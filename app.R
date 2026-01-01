@@ -59,7 +59,6 @@ call_api <- function(endpoint, params, current_env) {
   )
 
   log_message("info", sprintf("调用接口: %s", endpoint))
-  # 注意：已移除可能泄露敏感信息的调试日志，不记录请求体内容
 
   tryCatch(
     {
@@ -131,7 +130,7 @@ get_hospital_id <- function(current_env) {
 
     if (response_json$returnCode == "0001") {
       config <<- modifyList(config, list(hospital_id = response_json$data))
-      log_message("info", sprintf("成功获取医疗机构ID: %s", config$hospital_id))
+      log_message("info", sprintf("成功获取医疗机构ID"))
       return(TRUE)
     } else {
       log_message(
@@ -272,26 +271,40 @@ ui <- fluidPage(
   
   tabsetPanel(
     tabPanel("订单查询", 
-      sidebarLayout(
-        sidebarPanel(
-          textInput("username", "用户名:", ""),
-          passwordInput("password", "密码:", ""),
-          
-          radioButtons("env", "环境选择:", 
-                       choices = list("测试环境" = "test", 
-                                     "生产环境" = "prod"), 
-                       selected = "prod"),
-          
-          dateRangeInput("date_range", "选择时间范围:",
-                        start = Sys.Date() - 15,  # 默认为当前时间的前一个月
-                        end = Sys.Date()),
-          
-          actionButton("confirm", "确认查询", 
-                       class = "btn-primary", 
-                       style = "margin-top: 10px; width: 100%;")
-        ),
-        
-        mainPanel(
+      # 上下布局，将输入控件放在上方，表格放在下方
+      fluidRow(
+        column(12,
+          wellPanel(
+            h4("查询条件"),
+            fluidRow(
+              column(3, textInput("username", "用户名:", "")),
+              column(3, passwordInput("password", "密码:", "")),
+              column(3, 
+                radioButtons("env", "环境选择:", 
+                           choices = list("测试环境" = "test", 
+                                         "生产环境" = "prod"), 
+                           selected = "prod")
+              ),
+              column(3, 
+                dateRangeInput("date_range", "选择时间范围:",
+                              start = Sys.Date() - 15,  # 默认为当前时间的前一个月
+                              end = Sys.Date())
+              )
+            ),
+            fluidRow(
+              column(12,
+                actionButton("confirm", "确认查询", 
+                           class = "btn-primary", 
+                           style = "margin-top: 10px; width: 100%;")
+              )
+            )
+          )
+        )
+      ),
+      
+      # 表格输出区域
+      fluidRow(
+        column(12,
           h3("企业反馈数量少于采购数量的品种"),
           DT::dataTableOutput("results_table")
         )
@@ -299,29 +312,43 @@ ui <- fluidPage(
     ),
     
     tabPanel("医保核对",
-      sidebarLayout(
-        sidebarPanel(
-          textInput("username2", "用户名:", ""),
-          passwordInput("password2", "密码:", ""),
-          
-          radioButtons("env2", "环境选择:", 
-                       choices = list("测试环境" = "test", 
-                                     "生产环境" = "prod"), 
-                       selected = "prod"),
-          
-          fileInput("upload_file", "上传Excel文件", 
-                    accept = c(".xlsx", ".xls")),
-          
-          actionButton("check_medical", "获取常用药目录并核对", 
-                       class = "btn-primary", 
-                       style = "margin-top: 10px; width: 100%;"),
-          
-          br(), br(),
-          
-          helpText("上传的Excel文件应包含'药品编码'列，用于与医保目录进行比对")
-        ),
-        
-        mainPanel(
+      # 上下布局，将输入控件放在上方，表格放在下方
+      fluidRow(
+        column(12,
+          wellPanel(
+            h4("核对条件"),
+            fluidRow(
+              column(3, textInput("username2", "用户名:", "")),
+              column(3, passwordInput("password2", "密码:", "")),
+              column(3,
+                radioButtons("env2", "环境选择:", 
+                           choices = list("测试环境" = "test", 
+                                         "生产环境" = "prod"), 
+                           selected = "prod")
+              ),
+              column(3,
+                fileInput("upload_file", "上传Excel文件", 
+                         accept = c(".xlsx", ".xls"))
+              )
+            ),
+            fluidRow(
+              column(12,
+                actionButton("check_medical", "获取常用药目录并核对", 
+                           class = "btn-primary", 
+                           style = "margin-top: 10px; width: 100%;"),
+                
+                br(), br(),
+                
+                helpText("上传的Excel文件应包含'药品编码'列，用于与医保目录进行比对")
+              )
+            )
+          )
+        )
+      ),
+      
+      # 表格输出区域
+      fluidRow(
+        column(12,
           h3("常用药目录与医保核对结果"),
           DT::dataTableOutput("medical_check_table")
         )
@@ -408,6 +435,7 @@ server <- function(input, output, session) {
       mutate(
         采购数量 = as.numeric(采购数量),
         企业反馈数量 = as.numeric(企业反馈数量),
+        订单创建时间 = format(as.Date(订单创建时间, format = "%Y-%m-%d %H:%M:%S"), "%Y-%m-%d"), # 格式化日期
         反馈率 = case_when(
           is.na(企业反馈数量) | 采购数量 == 0 ~ "0%",
           TRUE ~ paste0(round((企业反馈数量 / 采购数量) * 100, 2), "%")
@@ -422,7 +450,12 @@ server <- function(input, output, session) {
         应采 = 采购数量,
         实发 = 企业反馈数量,
         反馈率,
+        配送 = 配送企业名称,
         备注 = 企业反馈备注
+      ) %>% 
+      arrange(
+        desc(时间),
+        反馈率
       )
     
     datatable(
